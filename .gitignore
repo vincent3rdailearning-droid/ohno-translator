@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller output
+OHNO.exe
+
+# Config (may contain sensitive paths; API key is in keyring, not here)
+# config.json is in %APPDATA%\OHNO\ — not in repo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+Desktop.ini
+nul
