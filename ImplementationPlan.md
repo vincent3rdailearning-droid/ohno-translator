@@ -3,8 +3,8 @@
 **Project**: OHNO Translator
 **Version**: 1.0 (MVP)
 **Date**: 2026-02-28
-**Status**: Pre-development — docs complete, coding not yet started
-**Current Phase**: Phase 0 (not yet started)
+**Status**: In development
+**Current Phase**: Phase 2 — Translation Core (next up)
 
 ---
 
@@ -12,9 +12,9 @@
 
 | Phase | Name | Deliverable | Branch | Status |
 |-------|------|-------------|--------|--------|
-| 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ⬜ Not started |
-| 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ⬜ Not started |
-| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | ⬜ Not started |
+| 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ✅ Complete |
+| 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ✅ Complete |
+| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | 🔄 Next |
 | 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ⬜ Not started |
 | 4 | Word Lookup | Highlight → definition tooltip, TTS pronunciation | `feature/word-lookup` | ⬜ Not started |
 | 5 | Clipboard Integration | Ctrl+Shift+V hotkey, auto-populate source | `feature/clipboard` | ⬜ Not started |
@@ -29,19 +29,23 @@
 **Goal**: Working dev environment, all deps installed, project structure created.
 
 ### Tasks
-- [ ] Create `ohno/` project folder with file structure from TechSpec
-- [ ] `git init` + create GitHub repo + push initial commit
-- [ ] Create Python 3.11 venv: `python -m venv .venv`
-- [ ] Install dependencies: `pip install -r requirements.txt`
-- [ ] Verify imports work: `python -c "import PyQt6; import anthropic; import keyboard; print('OK')"`
-- [ ] Create `assets/icon.png` placeholder (any 32×32 PNG)
-- [ ] Create `config.py` with schema + defaults + load/save to `%APPDATA%\OHNO\`
-- [ ] Smoke test: `config.py` creates `config.json` in AppData on first run
+- [x] Create `ohno/` project folder with file structure from TechSpec
+- [x] `git init` + create GitHub repo + push initial commit
+- [x] Create Python 3.14 venv: `python -m venv .venv`
+- [x] Install dependencies: `pip install -r requirements.txt`
+- [x] Verify imports work: `python -c "import PyQt6; import anthropic; import keyboard; print('OK')"`
+- [x] Create `assets/icon.png` placeholder (32×32 PNG generated via PyQt6)
+- [x] Create `config.py` with schema + defaults + load/save to `%APPDATA%/OHNO/`
+- [x] Smoke test: `config.py` creates `config.json` in AppData on first run
 
 ### Acceptance Criteria
-- [ ] All imports resolve without error
-- [ ] `config.json` created automatically with defaults in correct AppData path
-- [ ] Git repo pushed to GitHub with `.gitignore` covering venv, `__pycache__`, `.exe`
+- [x] All imports resolve without error
+- [x] `config.json` created automatically with defaults in correct AppData path
+- [x] Git repo pushed to GitHub with `.gitignore` covering venv, `__pycache__`, `.exe`
+
+### Notes
+- Python 3.14.3 used (Windows Store install) — satisfies 3.11+ requirement
+- GitHub repo: https://github.com/vincent3rdailearning-droid/ohno-translator
 
 ### Known Risks
 | Risk | Mitigation |
@@ -57,24 +61,28 @@
 **Goal**: OHNO lives in system tray; Ctrl+Shift+T shows/hides a blank popup.
 
 ### Tasks
-- [ ] `main.py`: Create `QApplication`, `QSystemTrayIcon` with icon + left/right-click menus
-- [ ] `window.py`: Create frameless `QWidget` popup (fixed starting size, draggable)
-- [ ] `hotkeys.py`: Background thread listening for `Ctrl+Shift+T`, emits Qt signal
-- [ ] Wire hotkey signal → `window.show()` / `window.hide()` toggle
-- [ ] Implement click-outside-to-dismiss (`QApplication.focusChanged` or `leaveEvent`)
-- [ ] Implement Escape key to dismiss
-- [ ] Always-on-top flag: `Qt.WindowStaysOnTopHint`
-- [ ] Tray right-click menu: Open | Settings (placeholder) | Exit
-- [ ] `main.py`: App stays alive when popup is closed (no `sys.exit` on close)
+- [x] `main.py`: Create `QApplication`, `QSystemTrayIcon` with icon + left/right-click menus
+- [x] `window.py`: Create frameless `QWidget` popup (fixed starting size, draggable)
+- [x] `hotkeys.py`: Background thread listening for `Ctrl+Shift+T`, emits Qt signal
+- [x] Wire hotkey signal → `window.show()` / `window.hide()` toggle
+- [x] Implement click-outside-to-dismiss (`focusOutEvent`)
+- [x] Implement Escape key to dismiss
+- [x] Always-on-top flag: `Qt.WindowStaysOnTopHint`
+- [x] Tray right-click menu: Open | Settings (placeholder) | Exit
+- [x] `main.py`: App stays alive when popup is closed (no `sys.exit` on close)
 
 ### Acceptance Criteria
-- [ ] OHNO starts → tray icon appears within 3 seconds
-- [ ] `Ctrl+Shift+T` → popup appears in < 200ms
-- [ ] `Ctrl+Shift+T` again → popup hides
-- [ ] `Escape` dismisses popup
-- [ ] Click outside popup → popup hides
-- [ ] Tray right-click → menu appears with Open / Exit working
-- [ ] Exit from tray → app fully quits
+- [x] OHNO starts → tray icon appears within 3 seconds
+- [x] `Ctrl+Shift+T` → popup appears in < 200ms
+- [x] `Ctrl+Shift+T` again → popup hides
+- [x] `Escape` dismisses popup
+- [x] Click outside popup → popup hides
+- [x] Tray right-click → menu appears with Open / Exit working
+- [x] Exit from tray → app fully quits
+
+### Notes
+- `keyboard` lib hotkeys also pre-registered for `Ctrl+Shift+V` (clipboard, Phase 5)
+- Smoke test: app ran 5s with no crash; tray icon confirmed visible
 
 ### Known Risks
 | Risk | Mitigation |
