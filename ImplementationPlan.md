@@ -4,7 +4,7 @@
 **Version**: 1.0 (MVP)
 **Date**: 2026-02-28
 **Status**: In development
-**Current Phase**: Phase 3 — UI Polish (next up)
+**Current Phase**: Phase 4 — Word Lookup (next up)
 
 ---
 
@@ -15,7 +15,7 @@
 | 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ✅ Complete |
 | 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ✅ Complete |
 | 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | ✅ Complete |
-| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | 🔄 Next |
+| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ✅ Complete |
 | 4 | Word Lookup | Highlight → definition tooltip, TTS pronunciation | `feature/word-lookup` | ⬜ Not started |
 | 5 | Clipboard Integration | Ctrl+Shift+V hotkey, auto-populate source | `feature/clipboard` | ⬜ Not started |
 | 6 | Settings Panel | All settings, API key secure storage, theme, autostart | `feature/settings` | ⬜ Not started |
@@ -169,24 +169,32 @@
 **Goal**: Full layout matching wireframe — language dropdowns, swap, copy/clear, tone selector.
 
 ### Tasks
-- [ ] Language dropdowns (Source + Target): populate from `TechSpec.md §6` language list
-- [ ] Swap (⇄) button: swaps source↔target language AND swaps source/output text
-- [ ] Tone selector: Formal / Casual / Literal radio buttons (QButtonGroup)
-- [ ] Copy Output button: `pyperclip.copy(output_text.toPlainText())`
-- [ ] Clear button: clears both source and output textareas
-- [ ] Settings gear icon button (placeholder action until Phase 6)
-- [ ] Title bar: custom drag area + close (hide) button + always-on-top pin toggle
-- [ ] Min window size: 400×350px; resizable with splitter between source/output
-- [ ] Light theme base styling (QSS stylesheet)
-- [ ] Font: system default (no custom font deps)
+- [x] Language dropdowns (Source + Target): populate from `TechSpec.md §6` language list
+- [x] Swap (⇄) button: swaps source↔target language AND swaps source/output text
+- [x] Tone selector: Formal / Casual / Literal radio buttons (QButtonGroup)
+- [x] Copy Output button: `pyperclip.copy(output_text.toPlainText())`
+- [x] Clear button: clears both source and output textareas
+- [x] Settings gear icon button (placeholder action until Phase 6)
+- [x] Title bar: custom drag area + close (hide) button + always-on-top pin toggle
+- [x] Min window size: 400×350px; resizable with splitter between source/output
+- [x] Light theme base styling (QSS stylesheet)
+- [x] Font: system default (no custom font deps)
 
 ### Acceptance Criteria
-- [ ] All UI elements from wireframe present and functional
-- [ ] Swap button swaps language pair and text content correctly
-- [ ] Changing tone while text is in source area re-triggers translation
-- [ ] Copy button copies output to clipboard
-- [ ] Clear button clears both areas
-- [ ] Window resizable; text areas expand with resize
+- [x] All UI elements from wireframe present and functional
+- [x] Swap button swaps language pair and text content correctly
+- [x] Changing tone while text is in source area re-triggers translation
+- [x] Copy button copies output to clipboard
+- [x] Clear button clears both areas
+- [x] Window resizable; text areas expand with resize
+
+### Notes
+- Custom `_TitleBar` widget handles drag; main window no longer has `mousePressEvent`/`mouseMoveEvent` overrides
+- `LANGUAGES` dict maps language codes to display names; reverse lookup via `_NAME_TO_CODE`
+- Swap uses `blockSignals()` to prevent double-triggering translation during swap
+- Copy uses `clipboard.set_clipboard_text()` (pyperclip wrapper from Phase 2)
+- `cfg` dict passed from `main.py` to `TranslatorWindow` — reads `default_source_lang`, `default_target_lang`, `default_tone`
+- Pin toggle re-applies `windowFlags()` and re-shows window to take effect (Qt requirement)
 
 ### Known Risks
 | Risk | Mitigation |
