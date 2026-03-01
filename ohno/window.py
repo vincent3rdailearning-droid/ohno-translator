@@ -2,19 +2,42 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QApplication, QVBoxLayout, QHBoxLayout, QTextEdit,
-    QLabel, QComboBox, QPushButton, QRadioButton, QButtonGroup,
-    QSplitter, QSizePolicy,
+    QLabel, QComboBox, QPushButton,
+    QSplitter, QSizePolicy, QSizeGrip,
 )
-from PyQt6.QtCore import Qt, QPoint, QEvent
+from PyQt6.QtCore import Qt, QPoint, QEvent, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 
 from translation import DebounceManager
 from clipboard import set_clipboard_text
-from languages import LANG_NAMES, display_name_for_code
+from languages import LANG_NAMES, display_name_for_code, _NAME_TO_CODE
+from word_lookup import LookupWorker, LookupPopup
 
 
 # ---------------------------------------------------------------------------
-# Custom title bar (draggable, with pin/settings/close)
+# Custom text edit with selection detection
+# ---------------------------------------------------------------------------
+
+class _SelectableTextEdit(QTextEdit):
+    """QTextEdit that emits a signal when text is selected (1-3 words)."""
+
+    text_selected = pyqtSignal(str, str)  # (selected_text, lang_code)
+
+    def __init__(self, lang_code_fn, parent=None):
+        super().__init__(parent)
+        self._lang_code_fn = lang_code_fn
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        selected = self.textCursor().selectedText().strip()
+        word_count = len(selected.split()) if selected else 0
+        if selected and 1 <= word_count <= 3:
+            lang_code = self._lang_code_fn()
+            self.text_selected.emit(selected, lang_code)
+
+
+# ---------------------------------------------------------------------------
+# Custom title bar (draggable, with pin/minimize/settings/close)
 # ---------------------------------------------------------------------------
 
 class _TitleBar(QWidget):
@@ -46,9 +69,17 @@ class _TitleBar(QWidget):
         self._pin_btn = QPushButton("\U0001f4cc")  # pin emoji
         self._pin_btn.setObjectName("titleBtn")
         self._pin_btn.setFixedSize(26, 26)
-        self._pin_btn.setToolTip("Toggle always-on-top")
+        self._pin_btn.setToolTip("Unpin (disable always-on-top)")
         self._pin_btn.clicked.connect(self._toggle_pin)
         layout.addWidget(self._pin_btn)
+
+        # Minimize button
+        minimize_btn = QPushButton("\u2581")  # ▁
+        minimize_btn.setObjectName("titleBtn")
+        minimize_btn.setFixedSize(26, 26)
+        minimize_btn.setToolTip("Minimize")
+        minimize_btn.clicked.connect(self._parent_window.showMinimized)
+        layout.addWidget(minimize_btn)
 
         # Settings gear (placeholder)
         settings_btn = QPushButton("\u2699")
@@ -108,6 +139,8 @@ class TranslatorWindow(QWidget):
         super().__init__(parent)
         self._cfg = cfg or {}
         self._debounce = DebounceManager(delay_ms=500, parent=self)
+        self._lookup_popup: LookupPopup | None = None
+        self._lookup_worker: LookupWorker | None = None
         self._setup_window()
         self._setup_translation()
 
@@ -156,31 +189,16 @@ class TranslatorWindow(QWidget):
             self._source_combo.setCurrentIndex(idx)
         source_layout.addWidget(self._source_combo)
 
-        self._source = QTextEdit()
+        self._source = _SelectableTextEdit(self._get_source_lang_code)
         self._source.setPlaceholderText("Type or paste text to translate...")
         self._source.setMinimumHeight(80)
         source_layout.addWidget(self._source)
 
-        # Middle controls row: tone selector + swap button
+        # Middle controls row: swap button only (tone removed)
         controls_row = QWidget()
         controls_layout = QHBoxLayout(controls_row)
         controls_layout.setContentsMargins(0, 2, 0, 2)
         controls_layout.setSpacing(8)
-
-        # Tone radio buttons
-        tone_label = QLabel("Tone:")
-        tone_label.setStyleSheet("font-size: 12px; color: #6b7280;")
-        controls_layout.addWidget(tone_label)
-
-        self._tone_group = QButtonGroup(self)
-        default_tone = self._cfg.get("default_tone", "formal")
-        for tone_value, tone_text in [("formal", "Formal"), ("casual", "Casual"), ("literal", "Literal")]:
-            rb = QRadioButton(tone_text)
-            rb.setProperty("tone_value", tone_value)
-            if tone_value == default_tone:
-                rb.setChecked(True)
-            self._tone_group.addButton(rb)
-            controls_layout.addWidget(rb)
 
         controls_layout.addStretch()
 
@@ -222,7 +240,7 @@ class TranslatorWindow(QWidget):
             self._target_combo.setCurrentIndex(idx)
         target_layout.addWidget(self._target_combo)
 
-        self._output = QTextEdit()
+        self._output = _SelectableTextEdit(self._get_target_lang_code)
         self._output.setPlaceholderText("Translation will appear here\u2026")
         self._output.setReadOnly(True)
         self._output.setMinimumHeight(80)
@@ -264,6 +282,15 @@ class TranslatorWindow(QWidget):
         content_layout.addWidget(bottom_row)
 
         root.addWidget(content, stretch=1)
+
+        # -- Size grip for resizing (bottom-right corner) --
+        grip_row = QHBoxLayout()
+        grip_row.setContentsMargins(0, 0, 0, 0)
+        grip_row.addStretch()
+        grip = QSizeGrip(self)
+        grip.setFixedSize(16, 16)
+        grip_row.addWidget(grip)
+        root.addLayout(grip_row)
 
     def _apply_stylesheet(self) -> None:
         self.setStyleSheet("""
@@ -321,22 +348,6 @@ class TranslatorWindow(QWidget):
             QTextEdit:focus {
                 border-color: #60a5fa;
             }
-            QRadioButton {
-                font-size: 12px;
-                spacing: 4px;
-                background: transparent;
-            }
-            QRadioButton::indicator {
-                width: 14px;
-                height: 14px;
-                border: 2px solid #94a3b8;
-                background: white;
-                border-radius: 7px;
-            }
-            QRadioButton::indicator:checked {
-                border: 2px solid #3b82f6;
-                background: #3b82f6;
-            }
             #swapBtn {
                 border: 1px solid #cbd5e1;
                 border-radius: 4px;
@@ -359,34 +370,41 @@ class TranslatorWindow(QWidget):
                 background-color: #e2e8f0;
                 border-color: #94a3b8;
             }
+            QSizeGrip {
+                background: transparent;
+            }
         """)
 
     def _setup_translation(self) -> None:
         self._source.textChanged.connect(self._on_source_changed)
         self._source_combo.currentIndexChanged.connect(self._on_control_changed)
         self._target_combo.currentIndexChanged.connect(self._on_control_changed)
-        self._tone_group.buttonClicked.connect(lambda _btn: self._on_control_changed())
         self._debounce.started.connect(self._on_translation_started)
         self._debounce.translation_ready.connect(self._on_translation_ready)
         self._debounce.error_occurred.connect(self._on_error)
+
+        # Word lookup signals
+        self._source.text_selected.connect(self._on_text_selected)
+        self._output.text_selected.connect(self._on_text_selected)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_selected_tone(self) -> str:
-        checked = self._tone_group.checkedButton()
-        if checked:
-            return checked.property("tone_value")
-        return "formal"
+    def _get_source_lang_code(self) -> str:
+        name = self._source_combo.currentText()
+        return _NAME_TO_CODE.get(name, "en")
+
+    def _get_target_lang_code(self) -> str:
+        name = self._target_combo.currentText()
+        return _NAME_TO_CODE.get(name, "en")
 
     def _trigger_translation(self) -> None:
         text = self._source.toPlainText()
         if not text.strip():
             return
         target_name = self._target_combo.currentText()
-        tone = self._get_selected_tone()
-        self._debounce.request(text, target_lang=target_name, tone=tone)
+        self._debounce.request(text, target_lang=target_name, tone="casual")
 
     # ------------------------------------------------------------------
     # Translation slots
@@ -402,7 +420,7 @@ class TranslatorWindow(QWidget):
         self._trigger_translation()
 
     def _on_control_changed(self) -> None:
-        """Re-trigger translation when language or tone changes."""
+        """Re-trigger translation when language changes."""
         self._trigger_translation()
 
     def _on_translation_started(self) -> None:
@@ -417,6 +435,37 @@ class TranslatorWindow(QWidget):
         self._status_label.setVisible(False)
         self._error_label.setText(message)
         self._error_label.setVisible(True)
+
+    # ------------------------------------------------------------------
+    # Word lookup
+    # ------------------------------------------------------------------
+
+    def _on_text_selected(self, word: str, lang_code: str) -> None:
+        """Handle text selection — start a word lookup."""
+        # Dismiss any existing popup
+        if self._lookup_popup is not None:
+            self._lookup_popup.close()
+            self._lookup_popup = None
+
+        # Cancel any in-flight worker
+        if self._lookup_worker is not None and self._lookup_worker.isRunning():
+            self._lookup_worker.quit()
+            self._lookup_worker.wait(200)
+
+        self._lookup_worker = LookupWorker(word, lang_code)
+        self._lookup_worker.lookup_ready.connect(self._on_lookup_ready)
+        self._lookup_worker.lookup_error.connect(self._on_lookup_error)
+        self._lookup_worker.start()
+
+    def _on_lookup_ready(self, info: dict) -> None:
+        if self._lookup_popup is not None:
+            self._lookup_popup.close()
+        self._lookup_popup = LookupPopup(info)
+        self._lookup_popup.show()
+
+    def _on_lookup_error(self, message: str) -> None:
+        # Silently ignore lookup errors — not critical
+        pass
 
     # ------------------------------------------------------------------
     # Button actions
@@ -489,10 +538,11 @@ class TranslatorWindow(QWidget):
             super().keyPressEvent(event)
 
     # ------------------------------------------------------------------
-    # Click-outside to dismiss
+    # Click-outside to dismiss (respects pin)
     # ------------------------------------------------------------------
 
     def changeEvent(self, event) -> None:
         if event.type() == QEvent.Type.WindowDeactivate:
-            self.hide()
+            if not self._title_bar._pinned:
+                self.hide()
         super().changeEvent(event)
