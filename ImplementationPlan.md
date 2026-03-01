@@ -4,7 +4,7 @@
 **Version**: 1.0 (MVP)
 **Date**: 2026-02-28
 **Status**: In development
-**Current Phase**: Phase 2 — Translation Core (next up)
+**Current Phase**: Phase 4 — Word Lookup (next up)
 
 ---
 
@@ -14,8 +14,8 @@
 |-------|------|-------------|--------|--------|
 | 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ✅ Complete |
 | 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ✅ Complete |
-| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | 🔄 Next |
-| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ⬜ Not started |
+| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | ✅ Complete |
+| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ✅ Complete |
 | 4 | Word Lookup | Highlight → definition tooltip, TTS pronunciation | `feature/word-lookup` | ⬜ Not started |
 | 5 | Clipboard Integration | Ctrl+Shift+V hotkey, auto-populate source | `feature/clipboard` | ⬜ Not started |
 | 6 | Settings Panel | All settings, API key secure storage, theme, autostart | `feature/settings` | ⬜ Not started |
@@ -96,26 +96,64 @@
 
 **Branch**: `feature/translation-core`
 **Goal**: Type in source textarea → translation appears in output after 500ms.
+**Strategy**: Option B — Backend-first parallelism. Track A and Track B run simultaneously (background agents); Integration runs after both complete.
 
-### Tasks
-- [ ] `translation.py`: `TranslationWorker(QThread)` with `anthropic` client
-- [ ] 500ms debounce: `QTimer.singleShot(500, ...)` resets on every keystroke
-- [ ] Build tone-aware system prompt (Formal / Casual / Literal) from `TechSpec.md §4`
-- [ ] Wire source `QTextEdit.textChanged` → debounce → `TranslationWorker.start()`
-- [ ] Worker emits `translation_ready(str)` signal → update output `QTextEdit`
-- [ ] Worker emits `error_occurred(str)` signal → show error banner
-- [ ] Loading spinner (animated `QLabel` or `QMovie`) visible during in-flight request
-- [ ] Placeholder output text: "Translation will appear here..."
-- [ ] Handle: empty source → clear output, do not call API
-- [ ] Handle: API errors (see TechSpec §8) with appropriate messages
+---
+
+### Track A — `translation.py` (Agent 1, parallel)
+
+**File**: `ohno/translation.py`
+**Scope**: Standalone — does NOT touch `window.py`
+
+- [x] `TranslationWorker(QThread)` class with `anthropic` client initialised from keyring
+- [x] `pyqtSignal` definitions: `translation_ready(str)`, `error_occurred(str)`
+- [x] 500ms debounce via `DebounceManager(QObject)` wrapping `QTimer` — resets on every keystroke
+- [x] Tone-aware system prompt builder (Formal / Casual / Literal) from `TechSpec.md §4`
+- [x] Handle empty source text → emit nothing, do not call API
+- [x] Handle API errors (timeout, auth, rate-limit) → emit `error_occurred(str)` with user-facing message
+- [x] Cancel in-flight request before starting a new one (store thread ref, call `quit()`)
+
+---
+
+### Track B — `clipboard.py` (Agent 2, parallel)
+
+**File**: `ohno/clipboard.py`
+**Scope**: Standalone — does NOT touch `window.py`
+**Note**: Phase 5 prep done here since it's self-contained
+
+- [x] `get_clipboard_text() -> str | None` — `pyperclip.paste()` with error handling
+- [x] `set_clipboard_text(text: str)` — `pyperclip.copy(text)`
+- [x] `QClipboard` wrapper: `get_qt_clipboard_text(app: QApplication) -> str | None`
+- [x] Handle non-text clipboard content (images, empty) → return `None` gracefully
+- [x] Module-level docstring describing public API
+
+---
+
+### Integration — wire into `window.py` (sequential, after both tracks complete)
+
+- [x] Add source `QTextEdit` and output `QTextEdit` to `TranslatorWindow`
+- [x] Instantiate `DebounceManager`; connect `textChanged` → `debounce.request()`
+- [x] Connect `translation_ready` → update output textarea
+- [x] Connect `error_occurred` → show inline error banner (`QLabel`)
+- [x] Loading status label ("Translating…") shown while request is in-flight
+- [x] Placeholder output text: "Translation will appear here…"
+- [x] Clear output when source is cleared
+
+---
 
 ### Acceptance Criteria
-- [ ] Type a sentence → translation appears within 1.5 seconds (p90)
-- [ ] Loading spinner visible during translation
-- [ ] Stop typing 500ms → translation fires (not on every keystroke)
-- [ ] Clear source → output clears
-- [ ] Disconnect internet → "Connection timed out" message shown
-- [ ] Missing API key → "API key not set" message shown
+- [x] Type a sentence → translation appears within 1.5 seconds (p90)
+- [x] Loading indicator visible during translation
+- [x] Stop typing 500ms → translation fires (not on every keystroke)
+- [x] Clear source → output clears
+- [x] Disconnect internet → "Connection timed out" message shown
+- [x] Missing API key → "API key not set" message shown
+
+### Notes
+- `DebounceManager` owns the full worker lifecycle (create, connect, cancel, clean up) — callers only call `request()` and connect to manager signals
+- `focusOutEvent` replaced with `changeEvent(WindowDeactivate)` — fires only when another app takes focus, not when child QTextEdits receive focus internally
+- `target_lang` ("English") and `tone` ("formal") are hardcoded for Phase 2; dropdowns + tone selector arrive in Phase 3
+- Track A and Track B were implemented in parallel by two background agents simultaneously; integration was done sequentially after both completed
 
 ### Known Risks
 | Risk | Mitigation |
@@ -131,24 +169,32 @@
 **Goal**: Full layout matching wireframe — language dropdowns, swap, copy/clear, tone selector.
 
 ### Tasks
-- [ ] Language dropdowns (Source + Target): populate from `TechSpec.md §6` language list
-- [ ] Swap (⇄) button: swaps source↔target language AND swaps source/output text
-- [ ] Tone selector: Formal / Casual / Literal radio buttons (QButtonGroup)
-- [ ] Copy Output button: `pyperclip.copy(output_text.toPlainText())`
-- [ ] Clear button: clears both source and output textareas
-- [ ] Settings gear icon button (placeholder action until Phase 6)
-- [ ] Title bar: custom drag area + close (hide) button + always-on-top pin toggle
-- [ ] Min window size: 400×350px; resizable with splitter between source/output
-- [ ] Light theme base styling (QSS stylesheet)
-- [ ] Font: system default (no custom font deps)
+- [x] Language dropdowns (Source + Target): populate from `TechSpec.md §6` language list
+- [x] Swap (⇄) button: swaps source↔target language AND swaps source/output text
+- [x] Tone selector: Formal / Casual / Literal radio buttons (QButtonGroup)
+- [x] Copy Output button: `pyperclip.copy(output_text.toPlainText())`
+- [x] Clear button: clears both source and output textareas
+- [x] Settings gear icon button (placeholder action until Phase 6)
+- [x] Title bar: custom drag area + close (hide) button + always-on-top pin toggle
+- [x] Min window size: 400×350px; resizable with splitter between source/output
+- [x] Light theme base styling (QSS stylesheet)
+- [x] Font: system default (no custom font deps)
 
 ### Acceptance Criteria
-- [ ] All UI elements from wireframe present and functional
-- [ ] Swap button swaps language pair and text content correctly
-- [ ] Changing tone while text is in source area re-triggers translation
-- [ ] Copy button copies output to clipboard
-- [ ] Clear button clears both areas
-- [ ] Window resizable; text areas expand with resize
+- [x] All UI elements from wireframe present and functional
+- [x] Swap button swaps language pair and text content correctly
+- [x] Changing tone while text is in source area re-triggers translation
+- [x] Copy button copies output to clipboard
+- [x] Clear button clears both areas
+- [x] Window resizable; text areas expand with resize
+
+### Notes
+- Custom `_TitleBar` widget handles drag; main window no longer has `mousePressEvent`/`mouseMoveEvent` overrides
+- `LANGUAGES` dict maps language codes to display names; reverse lookup via `_NAME_TO_CODE`
+- Swap uses `blockSignals()` to prevent double-triggering translation during swap
+- Copy uses `clipboard.set_clipboard_text()` (pyperclip wrapper from Phase 2)
+- `cfg` dict passed from `main.py` to `TranslatorWindow` — reads `default_source_lang`, `default_target_lang`, `default_tone`
+- Pin toggle re-applies `windowFlags()` and re-shows window to take effect (Qt requirement)
 
 ### Known Risks
 | Risk | Mitigation |
@@ -305,6 +351,22 @@
 **MVP strategy: manual smoke test per phase** (no automated test suite for GUI MVP).
 
 Each phase includes a checkbox acceptance criteria list above. Before merging a branch, all acceptance criteria must be manually verified.
+
+### Automated UAT (User Acceptance Testing) — Required Per Phase
+
+**Before presenting any phase to the user for testing**, Claude must perform its own UAT pass:
+
+1. **Create test cases**: Write 3–5 concrete use cases covering the phase's acceptance criteria (e.g., "Type 'hello', wait 1s, verify translation appears in output")
+2. **Launch the app**: Run the app via `python main.py` in the background
+3. **Execute test cases programmatically where possible**: Use Python scripts or Qt test helpers to simulate user actions and verify outcomes
+4. **Test edge cases**: Empty input, rapid clicking, long text, special characters, CJK text, window resize/minimize/restore
+5. **Verify no crashes**: App must survive 30+ seconds of normal use without segfault or unhandled exception
+6. **Check for regressions**: Re-test key features from prior phases (e.g., hotkey toggle, translation, copy/clear)
+7. **Document results**: Log which tests passed/failed in a brief summary before handing off to the user
+
+**Only present the feature to the user after all UAT tests pass.** If a test fails, fix the issue and re-run UAT before asking the user to test.
+
+This applies to all phases, all projects — not just this one.
 
 ### Final Release Checklist (Phase 7)
 - Full Phase 7 release checklist above

@@ -57,6 +57,35 @@ IMPORTANT: This project follows a strict phase-based workflow. After completing 
 3. **Commit the updated `ImplementationPlan.md`** along with the phase code
 4. **Merge the feature branch to `main`** before starting the next phase branch
 
+**For parallel phases (Option B)**: Update `ImplementationPlan.md` as soon as each track (Agent A / Agent B) completes — do not wait for the integration step. Check off that track's tasks immediately when the agent reports done, then check off the integration tasks after that step finishes.
+
+## Parallel Development Strategy
+
+Some Phase 2+ tasks can be implemented by two agents simultaneously, cutting wall-clock time roughly in half.
+
+**Safe to parallelize** (no shared file dependency):
+- Standalone worker classes: `translation.py`, `word_lookup.py`
+- Pure helper modules: `clipboard.py`, `config.py`
+- Separate dialogs: `settings.py` (once window.py API is stable)
+
+**NOT safe to parallelize** (shared file — must remain sequential):
+- Anything that modifies `window.py` simultaneously
+- Feature chains where Task B depends on Task A's output
+- Integration steps that wire multiple modules together
+
+### Option B — Backend-first parallelism (Phase 2 example)
+
+When a phase contains standalone backend modules plus a shared UI integration step:
+
+1. **Agent A** (background): implement the standalone worker (`translation.py`)
+2. **Agent B** (background): implement the standalone helper (`clipboard.py`)
+3. Launch both agents in the **same terminal** with `run_in_background: true` — shared context, auto-notification on completion, no extra setup needed
+4. **Integration pass** (after both complete): wire both into `window.py` in a single sequential step
+
+**Never** parallelize tasks that touch the same file. The integration step always remains sequential.
+
+---
+
 ## Branch Naming
 - `setup` — Phase 0
 - `feature/tray-window` — Phase 1
@@ -83,6 +112,19 @@ IMPORTANT: This project follows a strict phase-based workflow. After completing 
 **Hotkeys**: Registered in `HotkeyListener` (background thread). Add new hotkeys there; connect signals in `main.py`.
 
 **Dismiss logic**: Window hides (not closes) on Escape / click-outside / tray toggle. App never quits unless Exit is chosen from tray menu.
+
+## UAT Before Handoff (Mandatory)
+
+Before presenting any completed phase or feature to the user for testing, you MUST perform your own UAT (User Acceptance Testing):
+
+1. **Write 3–5 test cases** covering the feature's acceptance criteria and edge cases
+2. **Launch the app** and test programmatically where possible (simulate clicks, input, verify output)
+3. **Test edge cases**: empty input, rapid interaction, CJK text, window resize/minimize, focus loss
+4. **Verify stability**: app must run 30+ seconds without crash or segfault
+5. **Check regressions**: re-test core features from prior phases (hotkey, translation, copy/clear)
+6. **Fix failures first**: if any test fails, fix and re-run UAT before handing off
+
+**Never ask the user to test a feature you haven't tested yourself.**
 
 ## Common Issues
 

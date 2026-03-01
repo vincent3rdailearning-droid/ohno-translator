@@ -26,7 +26,7 @@ def main() -> None:
     cfg = load_config()
 
     # -- Main window -----------------------------------------------------
-    window = TranslatorWindow()
+    window = TranslatorWindow(cfg=cfg)
 
     # -- System tray -----------------------------------------------------
     icon = QIcon(_icon_path())
