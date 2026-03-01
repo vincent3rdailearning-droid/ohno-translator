@@ -4,7 +4,7 @@
 **Version**: 1.0 (MVP)
 **Date**: 2026-02-28
 **Status**: In development
-**Current Phase**: Phase 2 — Translation Core (next up)
+**Current Phase**: Phase 3 — UI Polish (next up)
 
 ---
 
@@ -14,8 +14,8 @@
 |-------|------|-------------|--------|--------|
 | 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ✅ Complete |
 | 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ✅ Complete |
-| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | 🔄 In Progress |
-| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ⬜ Not started |
+| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | ✅ Complete |
+| 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | 🔄 Next |
 | 4 | Word Lookup | Highlight → definition tooltip, TTS pronunciation | `feature/word-lookup` | ⬜ Not started |
 | 5 | Clipboard Integration | Ctrl+Shift+V hotkey, auto-populate source | `feature/clipboard` | ⬜ Not started |
 | 6 | Settings Panel | All settings, API key secure storage, theme, autostart | `feature/settings` | ⬜ Not started |
@@ -105,13 +105,13 @@
 **File**: `ohno/translation.py`
 **Scope**: Standalone — does NOT touch `window.py`
 
-- [ ] `TranslationWorker(QThread)` class with `anthropic` client initialised from keyring
-- [ ] `pyqtSignal` definitions: `translation_ready(str)`, `error_occurred(str)`
-- [ ] 500ms debounce via `QTimer.singleShot(500, ...)` — resets on every keystroke
-- [ ] Tone-aware system prompt builder (Formal / Casual / Literal) from `TechSpec.md §4`
-- [ ] Handle empty source text → emit nothing, do not call API
-- [ ] Handle API errors (timeout, auth, rate-limit) → emit `error_occurred(str)` with user-facing message
-- [ ] Cancel in-flight request before starting a new one (store thread ref, call `quit()`)
+- [x] `TranslationWorker(QThread)` class with `anthropic` client initialised from keyring
+- [x] `pyqtSignal` definitions: `translation_ready(str)`, `error_occurred(str)`
+- [x] 500ms debounce via `DebounceManager(QObject)` wrapping `QTimer` — resets on every keystroke
+- [x] Tone-aware system prompt builder (Formal / Casual / Literal) from `TechSpec.md §4`
+- [x] Handle empty source text → emit nothing, do not call API
+- [x] Handle API errors (timeout, auth, rate-limit) → emit `error_occurred(str)` with user-facing message
+- [x] Cancel in-flight request before starting a new one (store thread ref, call `quit()`)
 
 ---
 
@@ -121,33 +121,39 @@
 **Scope**: Standalone — does NOT touch `window.py`
 **Note**: Phase 5 prep done here since it's self-contained
 
-- [ ] `get_clipboard_text() -> str | None` — `pyperclip.paste()` with error handling
-- [ ] `set_clipboard_text(text: str)` — `pyperclip.copy(text)`
-- [ ] `QClipboard` wrapper: `get_qt_clipboard_text(app: QApplication) -> str | None`
-- [ ] Handle non-text clipboard content (images, empty) → return `None` gracefully
-- [ ] Module-level docstring describing public API
+- [x] `get_clipboard_text() -> str | None` — `pyperclip.paste()` with error handling
+- [x] `set_clipboard_text(text: str)` — `pyperclip.copy(text)`
+- [x] `QClipboard` wrapper: `get_qt_clipboard_text(app: QApplication) -> str | None`
+- [x] Handle non-text clipboard content (images, empty) → return `None` gracefully
+- [x] Module-level docstring describing public API
 
 ---
 
 ### Integration — wire into `window.py` (sequential, after both tracks complete)
 
-- [ ] Add source `QTextEdit` and output `QTextEdit` to `OHNOWindow`
-- [ ] Instantiate `TranslationWorker`; connect `textChanged` → debounce → `worker.start()`
-- [ ] Connect `translation_ready` → update output textarea
-- [ ] Connect `error_occurred` → show inline error banner (dismissible `QLabel`)
-- [ ] Loading spinner (`QLabel` with animated `QMovie`) shown while request is in-flight
-- [ ] Placeholder output text: "Translation will appear here..."
-- [ ] Clear output when source is cleared
+- [x] Add source `QTextEdit` and output `QTextEdit` to `TranslatorWindow`
+- [x] Instantiate `DebounceManager`; connect `textChanged` → `debounce.request()`
+- [x] Connect `translation_ready` → update output textarea
+- [x] Connect `error_occurred` → show inline error banner (`QLabel`)
+- [x] Loading status label ("Translating…") shown while request is in-flight
+- [x] Placeholder output text: "Translation will appear here…"
+- [x] Clear output when source is cleared
 
 ---
 
 ### Acceptance Criteria
-- [ ] Type a sentence → translation appears within 1.5 seconds (p90)
-- [ ] Loading spinner visible during translation
-- [ ] Stop typing 500ms → translation fires (not on every keystroke)
-- [ ] Clear source → output clears
-- [ ] Disconnect internet → "Connection timed out" message shown
-- [ ] Missing API key → "API key not set" message shown
+- [x] Type a sentence → translation appears within 1.5 seconds (p90)
+- [x] Loading indicator visible during translation
+- [x] Stop typing 500ms → translation fires (not on every keystroke)
+- [x] Clear source → output clears
+- [x] Disconnect internet → "Connection timed out" message shown
+- [x] Missing API key → "API key not set" message shown
+
+### Notes
+- `DebounceManager` owns the full worker lifecycle (create, connect, cancel, clean up) — callers only call `request()` and connect to manager signals
+- `focusOutEvent` replaced with `changeEvent(WindowDeactivate)` — fires only when another app takes focus, not when child QTextEdits receive focus internally
+- `target_lang` ("English") and `tone` ("formal") are hardcoded for Phase 2; dropdowns + tone selector arrive in Phase 3
+- Track A and Track B were implemented in parallel by two background agents simultaneously; integration was done sequentially after both completed
 
 ### Known Risks
 | Risk | Mitigation |

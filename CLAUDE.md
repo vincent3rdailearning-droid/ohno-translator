@@ -57,6 +57,8 @@ IMPORTANT: This project follows a strict phase-based workflow. After completing 
 3. **Commit the updated `ImplementationPlan.md`** along with the phase code
 4. **Merge the feature branch to `main`** before starting the next phase branch
 
+**For parallel phases (Option B)**: Update `ImplementationPlan.md` as soon as each track (Agent A / Agent B) completes — do not wait for the integration step. Check off that track's tasks immediately when the agent reports done, then check off the integration tasks after that step finishes.
+
 ## Parallel Development Strategy
 
 Some Phase 2+ tasks can be implemented by two agents simultaneously, cutting wall-clock time roughly in half.
