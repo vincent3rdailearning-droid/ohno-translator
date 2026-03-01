@@ -113,6 +113,19 @@ When a phase contains standalone backend modules plus a shared UI integration st
 
 **Dismiss logic**: Window hides (not closes) on Escape / click-outside / tray toggle. App never quits unless Exit is chosen from tray menu.
 
+## UAT Before Handoff (Mandatory)
+
+Before presenting any completed phase or feature to the user for testing, you MUST perform your own UAT (User Acceptance Testing):
+
+1. **Write 3–5 test cases** covering the feature's acceptance criteria and edge cases
+2. **Launch the app** and test programmatically where possible (simulate clicks, input, verify output)
+3. **Test edge cases**: empty input, rapid interaction, CJK text, window resize/minimize, focus loss
+4. **Verify stability**: app must run 30+ seconds without crash or segfault
+5. **Check regressions**: re-test core features from prior phases (hotkey, translation, copy/clear)
+6. **Fix failures first**: if any test fails, fix and re-run UAT before handing off
+
+**Never ask the user to test a feature you haven't tested yourself.**
+
 ## Common Issues
 
 **Hotkey not firing** — `keyboard` lib may need admin on some Windows configs. Run as administrator if `Ctrl+Shift+T` doesn't work.

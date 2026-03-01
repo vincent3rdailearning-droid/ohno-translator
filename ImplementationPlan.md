@@ -352,6 +352,22 @@
 
 Each phase includes a checkbox acceptance criteria list above. Before merging a branch, all acceptance criteria must be manually verified.
 
+### Automated UAT (User Acceptance Testing) — Required Per Phase
+
+**Before presenting any phase to the user for testing**, Claude must perform its own UAT pass:
+
+1. **Create test cases**: Write 3–5 concrete use cases covering the phase's acceptance criteria (e.g., "Type 'hello', wait 1s, verify translation appears in output")
+2. **Launch the app**: Run the app via `python main.py` in the background
+3. **Execute test cases programmatically where possible**: Use Python scripts or Qt test helpers to simulate user actions and verify outcomes
+4. **Test edge cases**: Empty input, rapid clicking, long text, special characters, CJK text, window resize/minimize/restore
+5. **Verify no crashes**: App must survive 30+ seconds of normal use without segfault or unhandled exception
+6. **Check for regressions**: Re-test key features from prior phases (e.g., hotkey toggle, translation, copy/clear)
+7. **Document results**: Log which tests passed/failed in a brief summary before handing off to the user
+
+**Only present the feature to the user after all UAT tests pass.** If a test fails, fix the issue and re-run UAT before asking the user to test.
+
+This applies to all phases, all projects — not just this one.
+
 ### Final Release Checklist (Phase 7)
 - Full Phase 7 release checklist above
 - Regression: re-verify all Phase 1–6 acceptance criteria on the packaged `.exe`

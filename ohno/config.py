@@ -25,12 +25,22 @@ DEFAULTS: dict = {
 }
 
 
-def _config_path() -> Path:
-    """Return path to config.json, creating the parent directory if needed."""
+def _config_dir() -> Path:
+    """Return the OHNO config directory, creating it if needed."""
     appdata = os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
     config_dir = Path(appdata) / "OHNO"
     config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "config.json"
+    return config_dir
+
+
+def _config_path() -> Path:
+    """Return path to config.json."""
+    return _config_dir() / "config.json"
+
+
+def _history_path() -> Path:
+    """Return path to history.json."""
+    return _config_dir() / "history.json"
 
 
 def load() -> dict:
@@ -53,6 +63,34 @@ def save(config: dict) -> None:
     safe = {k: config[k] for k in DEFAULTS if k in config}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(safe, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# History helpers
+# ---------------------------------------------------------------------------
+
+MAX_HISTORY = 10
+
+
+def load_history() -> list[dict]:
+    """Load translation history from disk. Returns list of entries."""
+    path = _history_path()
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data[:MAX_HISTORY]
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def save_history(history: list[dict]) -> None:
+    """Persist translation history to disk (max 10 entries)."""
+    path = _history_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(history[:MAX_HISTORY], f, indent=2, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

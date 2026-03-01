@@ -2,36 +2,47 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QApplication, QVBoxLayout, QHBoxLayout, QTextEdit,
-    QLabel, QComboBox, QPushButton,
+    QLabel, QComboBox, QPushButton, QMenu,
     QSplitter, QSizePolicy, QSizeGrip,
 )
-from PyQt6.QtCore import Qt, QPoint, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QEvent, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 
 from translation import DebounceManager
 from clipboard import set_clipboard_text
+from config import load_history, save_history
 from languages import LANG_NAMES, display_name_for_code, _NAME_TO_CODE
-from word_lookup import LookupWorker, LookupPopup
-
+from word_lookup import LookupManager, LookupPopup
+from settings import SettingsDialog
 
 # ---------------------------------------------------------------------------
 # Custom text edit with selection detection
 # ---------------------------------------------------------------------------
 
 class _SelectableTextEdit(QTextEdit):
-    """QTextEdit that emits a signal when text is selected (1-3 words)."""
+    """QTextEdit that emits a signal when text is selected (1-3 words or up to 40 chars)."""
 
     text_selected = pyqtSignal(str, str)  # (selected_text, lang_code)
 
     def __init__(self, lang_code_fn, parent=None):
         super().__init__(parent)
         self._lang_code_fn = lang_code_fn
+        self.selectionChanged.connect(self._on_selection_changed)
+        self._sel_timer = QTimer(self)
+        self._sel_timer.setSingleShot(True)
+        self._sel_timer.setInterval(200)
+        self._sel_timer.timeout.connect(self._emit_if_selected)
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        super().mouseReleaseEvent(event)
+    def _on_selection_changed(self) -> None:
+        self._sel_timer.start()
+
+    def _emit_if_selected(self) -> None:
         selected = self.textCursor().selectedText().strip()
-        word_count = len(selected.split()) if selected else 0
-        if selected and 1 <= word_count <= 3:
+        if not selected:
+            return
+        # Allow 1-3 space-separated words OR up to 40 characters (for CJK)
+        word_count = len(selected.split())
+        if word_count <= 3 and len(selected) <= 40:
             lang_code = self._lang_code_fn()
             self.text_selected.emit(selected, lang_code)
 
@@ -81,12 +92,12 @@ class _TitleBar(QWidget):
         minimize_btn.clicked.connect(self._parent_window.showMinimized)
         layout.addWidget(minimize_btn)
 
-        # Settings gear (placeholder)
+        # Settings gear
         settings_btn = QPushButton("\u2699")
         settings_btn.setObjectName("titleBtn")
         settings_btn.setFixedSize(26, 26)
-        settings_btn.setToolTip("Settings (coming soon)")
-        settings_btn.setEnabled(False)
+        settings_btn.setToolTip("Settings")
+        settings_btn.clicked.connect(self._parent_window.open_settings)
         layout.addWidget(settings_btn)
 
         # Close button
@@ -140,7 +151,12 @@ class TranslatorWindow(QWidget):
         self._cfg = cfg or {}
         self._debounce = DebounceManager(delay_ms=500, parent=self)
         self._lookup_popup: LookupPopup | None = None
-        self._lookup_worker: LookupWorker | None = None
+        self._lookup_mgr = LookupManager(parent=self)
+        self._lookup_mgr.lookup_ready.connect(self._on_lookup_ready)
+        self._lookup_mgr.lookup_error.connect(self._on_lookup_error)
+        self._showing_popup = False
+        self._first_show = True
+        self._history: list[dict] = load_history()
         self._setup_window()
         self._setup_translation()
 
@@ -265,6 +281,12 @@ class TranslatorWindow(QWidget):
         bottom_layout.setContentsMargins(0, 4, 0, 0)
         bottom_layout.setSpacing(8)
 
+        history_btn = QPushButton("History")
+        history_btn.setObjectName("actionBtn")
+        history_btn.setToolTip("Translation history")
+        history_btn.clicked.connect(self._on_show_history)
+        bottom_layout.addWidget(history_btn)
+
         bottom_layout.addStretch()
 
         clear_btn = QPushButton("Clear")
@@ -283,13 +305,16 @@ class TranslatorWindow(QWidget):
 
         root.addWidget(content, stretch=1)
 
-        # -- Size grip for resizing (bottom-right corner) --
+        # -- Size grips for resizing (both bottom corners) --
         grip_row = QHBoxLayout()
         grip_row.setContentsMargins(0, 0, 0, 0)
+        grip_left = QSizeGrip(self)
+        grip_left.setFixedSize(16, 16)
+        grip_row.addWidget(grip_left)
         grip_row.addStretch()
-        grip = QSizeGrip(self)
-        grip.setFixedSize(16, 16)
-        grip_row.addWidget(grip)
+        grip_right = QSizeGrip(self)
+        grip_right.setFixedSize(16, 16)
+        grip_row.addWidget(grip_right)
         root.addLayout(grip_row)
 
     def _apply_stylesheet(self) -> None:
@@ -404,7 +429,8 @@ class TranslatorWindow(QWidget):
         if not text.strip():
             return
         target_name = self._target_combo.currentText()
-        self._debounce.request(text, target_lang=target_name, tone="casual")
+        tone = self._cfg.get("default_tone", "casual")
+        self._debounce.request(text, target_lang=target_name, tone=tone)
 
     # ------------------------------------------------------------------
     # Translation slots
@@ -430,6 +456,7 @@ class TranslatorWindow(QWidget):
     def _on_translation_ready(self, text: str) -> None:
         self._status_label.setVisible(False)
         self._output.setPlainText(text)
+        self._auto_save_history()
 
     def _on_error(self, message: str) -> None:
         self._status_label.setVisible(False)
@@ -447,21 +474,18 @@ class TranslatorWindow(QWidget):
             self._lookup_popup.close()
             self._lookup_popup = None
 
-        # Cancel any in-flight worker
-        if self._lookup_worker is not None and self._lookup_worker.isRunning():
-            self._lookup_worker.quit()
-            self._lookup_worker.wait(200)
-
-        self._lookup_worker = LookupWorker(word, lang_code)
-        self._lookup_worker.lookup_ready.connect(self._on_lookup_ready)
-        self._lookup_worker.lookup_error.connect(self._on_lookup_error)
-        self._lookup_worker.start()
+        self._lookup_mgr.lookup(word, lang_code)
 
     def _on_lookup_ready(self, info: dict) -> None:
         if self._lookup_popup is not None:
             self._lookup_popup.close()
+            self._lookup_popup = None
+        self._showing_popup = True
         self._lookup_popup = LookupPopup(info)
         self._lookup_popup.show()
+        # Re-activate main window so it doesn't lose focus
+        self.activateWindow()
+        self._showing_popup = False
 
     def _on_lookup_error(self, message: str) -> None:
         # Silently ignore lookup errors — not critical
@@ -502,8 +526,129 @@ class TranslatorWindow(QWidget):
             set_clipboard_text(text)
 
     def _on_clear(self) -> None:
+        self._auto_save_history()
         self._source.clear()
         self._output.clear()
+
+    # ------------------------------------------------------------------
+    # History
+    # ------------------------------------------------------------------
+
+    def _auto_save_history(self) -> None:
+        """Auto-save the current translation pair to history."""
+        source_text = self._source.toPlainText().strip()
+        target_text = self._output.toPlainText().strip()
+        if not source_text or not target_text:
+            return
+
+        entry = {
+            "source": source_text,
+            "target": target_text,
+            "src_lang": self._source_combo.currentText(),
+            "tgt_lang": self._target_combo.currentText(),
+        }
+
+        # Avoid duplicates (same source text)
+        self._history = [h for h in self._history if h["source"] != source_text]
+        self._history.insert(0, entry)
+        self._history = self._history[:10]
+        save_history(self._history)
+
+    def _on_show_history(self) -> None:
+        """Show a menu of past translations."""
+        if not self._history:
+            self._status_label.setText("No saved history yet")
+            self._status_label.setVisible(True)
+            QTimer.singleShot(1500, lambda: self._status_label.setVisible(False))
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 4px;
+                padding: 4px;
+                font-size: 13px;
+            }
+            QMenu::item {
+                padding: 6px 12px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #e2e8f0;
+            }
+        """)
+
+        for i, entry in enumerate(self._history):
+            # Truncate long text for menu display
+            src_preview = entry["source"][:30]
+            if len(entry["source"]) > 30:
+                src_preview += "\u2026"
+            tgt_preview = entry["target"][:30]
+            if len(entry["target"]) > 30:
+                tgt_preview += "\u2026"
+            label = f"{src_preview}  \u2192  {tgt_preview}"
+            action = menu.addAction(label)
+            action.triggered.connect(lambda checked, e=entry: self._load_history(e))
+
+        # Show menu above the history button
+        menu.exec(self.mapToGlobal(QPoint(12, self.height() - 60)))
+
+    def _load_history(self, entry: dict) -> None:
+        """Load a history entry back into the text areas."""
+        self._source_combo.blockSignals(True)
+        self._target_combo.blockSignals(True)
+        self._source.blockSignals(True)
+
+        idx = self._source_combo.findText(entry["src_lang"])
+        if idx >= 0:
+            self._source_combo.setCurrentIndex(idx)
+        idx = self._target_combo.findText(entry["tgt_lang"])
+        if idx >= 0:
+            self._target_combo.setCurrentIndex(idx)
+
+        self._source.setPlainText(entry["source"])
+        self._output.setPlainText(entry["target"])
+
+        self._source_combo.blockSignals(False)
+        self._target_combo.blockSignals(False)
+        self._source.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    def open_settings(self) -> None:
+        """Open the settings dialog."""
+        dlg = SettingsDialog(self._cfg, parent=self)
+        dlg.settings_changed.connect(self._apply_settings)
+        dlg.exec()
+
+    def _apply_settings(self, new_cfg: dict) -> None:
+        """Apply settings from the dialog without restarting."""
+        self._cfg = new_cfg
+
+        # Update language dropdowns
+        src_name = display_name_for_code(new_cfg.get("default_source_lang", "zh-TW"))
+        tgt_name = display_name_for_code(new_cfg.get("default_target_lang", "en"))
+
+        self._source_combo.blockSignals(True)
+        self._target_combo.blockSignals(True)
+
+        idx = self._source_combo.findText(src_name)
+        if idx >= 0:
+            self._source_combo.setCurrentIndex(idx)
+        idx = self._target_combo.findText(tgt_name)
+        if idx >= 0:
+            self._target_combo.setCurrentIndex(idx)
+
+        self._source_combo.blockSignals(False)
+        self._target_combo.blockSignals(False)
+
+        # Re-trigger translation with new settings if there's text
+        if self._source.toPlainText().strip():
+            self._trigger_translation()
 
     # ------------------------------------------------------------------
     # Toggle visibility (called by hotkey)
@@ -513,7 +658,9 @@ class TranslatorWindow(QWidget):
         if self.isVisible():
             self.hide()
         else:
-            self._center_on_screen()
+            if self._first_show:
+                self._center_on_screen()
+                self._first_show = False
             self.show()
             self.activateWindow()
             self.raise_()
@@ -543,6 +690,10 @@ class TranslatorWindow(QWidget):
 
     def changeEvent(self, event) -> None:
         if event.type() == QEvent.Type.WindowDeactivate:
-            if not self._title_bar._pinned:
+            # Don't hide while showing a lookup popup or when pinned
+            if not self._title_bar._pinned and not getattr(self, '_showing_popup', False):
+                # Check if a lookup popup is currently visible
+                if self._lookup_popup is not None and self._lookup_popup.isVisible():
+                    return
                 self.hide()
         super().changeEvent(event)
