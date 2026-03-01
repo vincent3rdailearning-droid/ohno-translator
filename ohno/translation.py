@@ -1,51 +1,20 @@
 """
-translation.py — Claude API translation worker with debounce.
+translation.py — Google Translate worker with debounce.
 
 Public API:
-    TranslationWorker(text, target_lang, tone)  — QThread that calls Claude API
+    TranslationWorker(text, target_lang, tone)  — QThread that calls Google Translate
     DebounceManager(delay_ms, parent)           — wraps QTimer + worker lifecycle
-    _build_system_prompt(tone, target_lang)     — builds tone-aware system prompt
 """
 
 from __future__ import annotations
-import keyring
-import anthropic
+from deep_translator import GoogleTranslator
 from PyQt6.QtCore import QThread, QTimer, QObject, pyqtSignal
 
-
-def _build_system_prompt(tone: str, target_lang: str) -> str:
-    """Build a tone-aware system prompt for the Claude translation request.
-
-    Args:
-        tone: One of "formal", "casual", or "literal". Unknown values fall back to "casual".
-        target_lang: Full language name string (e.g. "English", "Japanese").
-
-    Returns:
-        A system prompt string with the target language substituted in.
-    """
-    if tone == "formal":
-        return (
-            f"You are a professional translator. Translate the following text into "
-            f"{target_lang} using formal, polished language appropriate for business or "
-            f"academic contexts. Return only the translated text."
-        )
-    elif tone == "literal":
-        return (
-            f"You are a translator. Provide a literal, word-for-word translation of the "
-            f"following text into {target_lang}, preserving the original structure as "
-            f"closely as possible. Return only the translated text."
-        )
-    else:
-        # "casual" and any unknown tone fall back to casual
-        return (
-            f"You are a translator. Translate the following text into {target_lang} using "
-            f"natural, conversational language as a native speaker would say it. Return "
-            f"only the translated text."
-        )
+from languages import _NAME_TO_CODE
 
 
 class TranslationWorker(QThread):
-    """QThread subclass that calls the Claude API to translate text.
+    """QThread subclass that calls Google Translate to translate text.
 
     Signals:
         translation_ready(str): Emitted with the translated text on success.
@@ -61,12 +30,12 @@ class TranslationWorker(QThread):
         Args:
             text:        Source text to translate.
             target_lang: Full language name (e.g. "English", "Japanese").
-            tone:        One of "formal", "casual", or "literal".
+            tone:        One of "formal", "casual", or "literal" (ignored for Google Translate).
         """
         super().__init__()
         self.text = text
         self.target_lang = target_lang
-        self.tone = tone
+        self.tone = tone  # accepted but ignored — Google Translate doesn't support tone
         self._cancelled = False
 
     def run(self) -> None:
@@ -74,37 +43,22 @@ class TranslationWorker(QThread):
         if not self.text.strip():
             return
 
-        api_key = keyring.get_password("ohno", "api_key")
-        if not api_key:
-            self.error_occurred.emit("API key not set. Open Settings to add it.")
+        lang_code = _NAME_TO_CODE.get(self.target_lang)
+        if not lang_code:
+            self.error_occurred.emit(f"Unknown target language: {self.target_lang}")
             return
 
-        system_prompt = _build_system_prompt(self.tone, self.target_lang)
-
         try:
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[{"role": "user", "content": self.text}],
-            )
+            result = GoogleTranslator(source="auto", target=lang_code).translate(self.text)
 
             if self._cancelled:
                 return
 
-            self.translation_ready.emit(response.content[0].text)
+            self.translation_ready.emit(result or "")
 
-        except anthropic.AuthenticationError:
-            self.error_occurred.emit("Invalid API key. Check Settings.")
-        except anthropic.RateLimitError:
-            self.error_occurred.emit("Rate limited. Please wait a moment.")
-        except anthropic.APIConnectionError:
-            self.error_occurred.emit("Connection timed out. Check internet.")
-        except anthropic.APIStatusError as e:
-            self.error_occurred.emit(f"Translation failed (error {e.status_code}).")
         except Exception as e:
-            self.error_occurred.emit(f"Unexpected error: {e}")
+            if not self._cancelled:
+                self.error_occurred.emit(f"Translation failed: {e}")
 
     def cancel(self) -> None:
         """Signal the worker to discard its result when it completes."""
@@ -132,12 +86,6 @@ class DebounceManager(QObject):
     cancelled = pyqtSignal()
 
     def __init__(self, delay_ms: int = 500, parent: QObject | None = None) -> None:
-        """Initialise the debounce manager.
-
-        Args:
-            delay_ms: Milliseconds of idle time before firing a translation request.
-            parent:   Optional Qt parent object.
-        """
         super().__init__(parent)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -151,13 +99,7 @@ class DebounceManager(QObject):
     def request(self, text: str, target_lang: str, tone: str) -> None:
         """Schedule a translation request.
 
-        Resets the debounce timer each time it is called. Call this on every
-        keystroke or parameter change that should trigger re-translation.
-
-        Args:
-            text:        Source text to translate.
-            target_lang: Full language name (e.g. "English", "Japanese").
-            tone:        One of "formal", "casual", or "literal".
+        Resets the debounce timer each time it is called.
         """
         self._pending_text = text
         self._pending_target = target_lang
@@ -166,7 +108,6 @@ class DebounceManager(QObject):
 
     def _on_timeout(self) -> None:
         """Called when the debounce timer fires. Starts a new TranslationWorker."""
-        # Cancel any in-flight worker
         if self._current_worker is not None and self._current_worker.isRunning():
             self._current_worker.cancel()
             self._current_worker.quit()

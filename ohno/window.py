@@ -10,32 +10,7 @@ from PyQt6.QtGui import QKeyEvent, QMouseEvent
 
 from translation import DebounceManager
 from clipboard import set_clipboard_text
-
-# ---------------------------------------------------------------------------
-# Language code <-> display name mapping
-# ---------------------------------------------------------------------------
-
-LANGUAGES: dict[str, str] = {
-    "zh-TW": "Chinese (Traditional)",
-    "zh-CN": "Chinese (Simplified)",
-    "ja":    "Japanese",
-    "en":    "English",
-    "ko":    "Korean",
-    "fr":    "French",
-    "de":    "German",
-    "es":    "Spanish",
-}
-
-# Reverse lookup: display name -> code
-_NAME_TO_CODE: dict[str, str] = {v: k for k, v in LANGUAGES.items()}
-
-# Ordered list of display names (stable iteration order)
-_LANG_NAMES: list[str] = list(LANGUAGES.values())
-
-
-def _display_name_for_code(code: str) -> str:
-    """Return the display name for a language code, or the code itself as fallback."""
-    return LANGUAGES.get(code, code)
+from languages import LANG_NAMES, display_name_for_code
 
 
 # ---------------------------------------------------------------------------
@@ -174,8 +149,8 @@ class TranslatorWindow(QWidget):
         source_layout.setSpacing(4)
 
         self._source_combo = QComboBox()
-        self._source_combo.addItems(_LANG_NAMES)
-        default_src = _display_name_for_code(self._cfg.get("default_source_lang", "zh-TW"))
+        self._source_combo.addItems(LANG_NAMES)
+        default_src = display_name_for_code(self._cfg.get("default_source_lang", "zh-TW"))
         idx = self._source_combo.findText(default_src)
         if idx >= 0:
             self._source_combo.setCurrentIndex(idx)
@@ -240,8 +215,8 @@ class TranslatorWindow(QWidget):
         target_layout.setSpacing(4)
 
         self._target_combo = QComboBox()
-        self._target_combo.addItems(_LANG_NAMES)
-        default_tgt = _display_name_for_code(self._cfg.get("default_target_lang", "en"))
+        self._target_combo.addItems(LANG_NAMES)
+        default_tgt = display_name_for_code(self._cfg.get("default_target_lang", "en"))
         idx = self._target_combo.findText(default_tgt)
         if idx >= 0:
             self._target_combo.setCurrentIndex(idx)
@@ -294,6 +269,7 @@ class TranslatorWindow(QWidget):
         self.setStyleSheet("""
             QWidget {
                 background-color: #f0f4f8;
+                color: #1f2937;
                 font-family: system-ui, sans-serif;
             }
             #titleBar {
@@ -325,6 +301,7 @@ class TranslatorWindow(QWidget):
                 border-radius: 4px;
                 padding: 4px 8px;
                 background-color: white;
+                color: #1f2937;
                 font-size: 13px;
             }
             QComboBox:hover {
@@ -338,6 +315,7 @@ class TranslatorWindow(QWidget):
                 border-radius: 6px;
                 padding: 6px;
                 background-color: white;
+                color: #1f2937;
                 font-size: 14px;
             }
             QTextEdit:focus {
@@ -346,6 +324,18 @@ class TranslatorWindow(QWidget):
             QRadioButton {
                 font-size: 12px;
                 spacing: 4px;
+                background: transparent;
+            }
+            QRadioButton::indicator {
+                width: 14px;
+                height: 14px;
+                border: 2px solid #94a3b8;
+                background: white;
+                border-radius: 7px;
+            }
+            QRadioButton::indicator:checked {
+                border: 2px solid #3b82f6;
+                background: #3b82f6;
             }
             #swapBtn {
                 border: 1px solid #cbd5e1;
@@ -375,7 +365,7 @@ class TranslatorWindow(QWidget):
         self._source.textChanged.connect(self._on_source_changed)
         self._source_combo.currentIndexChanged.connect(self._on_control_changed)
         self._target_combo.currentIndexChanged.connect(self._on_control_changed)
-        self._tone_group.buttonClicked.connect(self._on_control_changed)
+        self._tone_group.buttonClicked.connect(lambda _btn: self._on_control_changed())
         self._debounce.started.connect(self._on_translation_started)
         self._debounce.translation_ready.connect(self._on_translation_ready)
         self._debounce.error_occurred.connect(self._on_error)
