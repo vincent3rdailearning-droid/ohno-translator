@@ -57,6 +57,33 @@ IMPORTANT: This project follows a strict phase-based workflow. After completing 
 3. **Commit the updated `ImplementationPlan.md`** along with the phase code
 4. **Merge the feature branch to `main`** before starting the next phase branch
 
+## Parallel Development Strategy
+
+Some Phase 2+ tasks can be implemented by two agents simultaneously, cutting wall-clock time roughly in half.
+
+**Safe to parallelize** (no shared file dependency):
+- Standalone worker classes: `translation.py`, `word_lookup.py`
+- Pure helper modules: `clipboard.py`, `config.py`
+- Separate dialogs: `settings.py` (once window.py API is stable)
+
+**NOT safe to parallelize** (shared file — must remain sequential):
+- Anything that modifies `window.py` simultaneously
+- Feature chains where Task B depends on Task A's output
+- Integration steps that wire multiple modules together
+
+### Option B — Backend-first parallelism (Phase 2 example)
+
+When a phase contains standalone backend modules plus a shared UI integration step:
+
+1. **Agent A** (background): implement the standalone worker (`translation.py`)
+2. **Agent B** (background): implement the standalone helper (`clipboard.py`)
+3. Launch both agents in the **same terminal** with `run_in_background: true` — shared context, auto-notification on completion, no extra setup needed
+4. **Integration pass** (after both complete): wire both into `window.py` in a single sequential step
+
+**Never** parallelize tasks that touch the same file. The integration step always remains sequential.
+
+---
+
 ## Branch Naming
 - `setup` — Phase 0
 - `feature/tray-window` — Phase 1

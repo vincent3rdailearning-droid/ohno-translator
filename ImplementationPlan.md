@@ -14,7 +14,7 @@
 |-------|------|-------------|--------|--------|
 | 0 | Setup | Repo, venv, deps, project skeleton | `setup` | ✅ Complete |
 | 1 | Tray + Window | System tray icon, basic popup, Ctrl+Shift+T hotkey | `feature/tray-window` | ✅ Complete |
-| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | 🔄 Next |
+| 2 | Translation Core | Claude API, debounce, tone-aware prompts, loading/error states | `feature/translation-core` | 🔄 In Progress |
 | 3 | UI Polish | Language dropdowns, swap button, copy/clear, full layout | `feature/ui-polish` | ⬜ Not started |
 | 4 | Word Lookup | Highlight → definition tooltip, TTS pronunciation | `feature/word-lookup` | ⬜ Not started |
 | 5 | Clipboard Integration | Ctrl+Shift+V hotkey, auto-populate source | `feature/clipboard` | ⬜ Not started |
@@ -96,18 +96,50 @@
 
 **Branch**: `feature/translation-core`
 **Goal**: Type in source textarea → translation appears in output after 500ms.
+**Strategy**: Option B — Backend-first parallelism. Track A and Track B run simultaneously (background agents); Integration runs after both complete.
 
-### Tasks
-- [ ] `translation.py`: `TranslationWorker(QThread)` with `anthropic` client
-- [ ] 500ms debounce: `QTimer.singleShot(500, ...)` resets on every keystroke
-- [ ] Build tone-aware system prompt (Formal / Casual / Literal) from `TechSpec.md §4`
-- [ ] Wire source `QTextEdit.textChanged` → debounce → `TranslationWorker.start()`
-- [ ] Worker emits `translation_ready(str)` signal → update output `QTextEdit`
-- [ ] Worker emits `error_occurred(str)` signal → show error banner
-- [ ] Loading spinner (animated `QLabel` or `QMovie`) visible during in-flight request
+---
+
+### Track A — `translation.py` (Agent 1, parallel)
+
+**File**: `ohno/translation.py`
+**Scope**: Standalone — does NOT touch `window.py`
+
+- [ ] `TranslationWorker(QThread)` class with `anthropic` client initialised from keyring
+- [ ] `pyqtSignal` definitions: `translation_ready(str)`, `error_occurred(str)`
+- [ ] 500ms debounce via `QTimer.singleShot(500, ...)` — resets on every keystroke
+- [ ] Tone-aware system prompt builder (Formal / Casual / Literal) from `TechSpec.md §4`
+- [ ] Handle empty source text → emit nothing, do not call API
+- [ ] Handle API errors (timeout, auth, rate-limit) → emit `error_occurred(str)` with user-facing message
+- [ ] Cancel in-flight request before starting a new one (store thread ref, call `quit()`)
+
+---
+
+### Track B — `clipboard.py` (Agent 2, parallel)
+
+**File**: `ohno/clipboard.py`
+**Scope**: Standalone — does NOT touch `window.py`
+**Note**: Phase 5 prep done here since it's self-contained
+
+- [ ] `get_clipboard_text() -> str | None` — `pyperclip.paste()` with error handling
+- [ ] `set_clipboard_text(text: str)` — `pyperclip.copy(text)`
+- [ ] `QClipboard` wrapper: `get_qt_clipboard_text(app: QApplication) -> str | None`
+- [ ] Handle non-text clipboard content (images, empty) → return `None` gracefully
+- [ ] Module-level docstring describing public API
+
+---
+
+### Integration — wire into `window.py` (sequential, after both tracks complete)
+
+- [ ] Add source `QTextEdit` and output `QTextEdit` to `OHNOWindow`
+- [ ] Instantiate `TranslationWorker`; connect `textChanged` → debounce → `worker.start()`
+- [ ] Connect `translation_ready` → update output textarea
+- [ ] Connect `error_occurred` → show inline error banner (dismissible `QLabel`)
+- [ ] Loading spinner (`QLabel` with animated `QMovie`) shown while request is in-flight
 - [ ] Placeholder output text: "Translation will appear here..."
-- [ ] Handle: empty source → clear output, do not call API
-- [ ] Handle: API errors (see TechSpec §8) with appropriate messages
+- [ ] Clear output when source is cleared
+
+---
 
 ### Acceptance Criteria
 - [ ] Type a sentence → translation appears within 1.5 seconds (p90)
