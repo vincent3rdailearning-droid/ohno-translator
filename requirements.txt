@@ -3,3 +3,4 @@ deep-translator>=1.11.0
 keyboard>=0.13.5
 pyperclip>=1.8.2
 pyttsx3>=2.90
+pyinstaller>=6.0

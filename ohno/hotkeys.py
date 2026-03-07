@@ -35,6 +35,26 @@ class HotkeyListener(QObject):
         except Exception:
             pass
 
+    def rebind(self, hotkey: str, clipboard_hotkey: str) -> None:
+        """Re-register hotkeys with new key combos (live, no restart needed)."""
+        try:
+            keyboard.remove_hotkey(self._hotkey)
+        except (KeyError, ValueError):
+            pass
+        try:
+            keyboard.remove_hotkey(self._clipboard_hotkey)
+        except (KeyError, ValueError):
+            pass
+
+        self._hotkey = hotkey
+        self._clipboard_hotkey = clipboard_hotkey
+
+        try:
+            keyboard.add_hotkey(self._hotkey, self.toggle_window.emit)
+            keyboard.add_hotkey(self._clipboard_hotkey, self.clipboard_paste.emit)
+        except Exception as e:
+            print(f"[hotkeys] rebind error: {e}")
+
     def _listen(self) -> None:
         try:
             keyboard.add_hotkey(self._hotkey, self.toggle_window.emit)
