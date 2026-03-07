@@ -31,18 +31,22 @@ def main() -> None:
     # -- System tray -----------------------------------------------------
     icon = QIcon(_icon_path())
     tray = QSystemTrayIcon(icon, parent=app)
-    tray.setToolTip("OHNO Translator")
+    tray.setToolTip("OHNO Translator — Right-click for menu, left-click to toggle")
 
     tray_menu = QMenu()
 
-    open_action = QAction("Open", tray_menu)
+    open_action = QAction("Show / Hide", tray_menu)
     open_action.triggered.connect(window.toggle)
     tray_menu.addAction(open_action)
+
+    bring_front_action = QAction("Bring to Front", tray_menu)
+    bring_front_action.triggered.connect(window.bring_to_front)
+    tray_menu.addAction(bring_front_action)
 
     tray_menu.addSeparator()
 
     settings_action = QAction("Settings", tray_menu)
-    settings_action.setEnabled(False)  # Placeholder until Phase 6
+    settings_action.triggered.connect(window.open_settings)
     tray_menu.addAction(settings_action)
 
     tray_menu.addSeparator()
@@ -68,6 +72,8 @@ def main() -> None:
         clipboard_hotkey=cfg.get("clipboard_hotkey", "ctrl+shift+v"),
     )
     listener.toggle_window.connect(window.toggle)
+    listener.clipboard_paste.connect(window.paste_clipboard)
+    window.set_hotkey_listener(listener)
     listener.start()
 
     # -- Run -------------------------------------------------------------

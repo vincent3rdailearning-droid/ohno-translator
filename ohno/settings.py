@@ -1,8 +1,9 @@
 # settings.py — Settings QDialog for configuring the translator.
 
+import sys
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QComboBox, QLineEdit, QPushButton, QLabel,
+    QComboBox, QLineEdit, QPushButton, QLabel, QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -10,6 +11,55 @@ from languages import LANG_NAMES, display_name_for_code
 from config import save as save_config
 
 TONES = [("formal", "Formal"), ("casual", "Casual"), ("literal", "Literal")]
+THEMES = [("light", "Light"), ("dark", "Dark"), ("system", "System")]
+
+
+def _get_autostart_enabled() -> bool:
+    """Check if OHNO is registered to start with Windows."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_READ,
+        )
+        try:
+            winreg.QueryValueEx(key, "OHNO")
+            return True
+        except FileNotFoundError:
+            return False
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
+
+def _set_autostart(enabled: bool) -> None:
+    """Add or remove OHNO from Windows startup registry."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE,
+        )
+        if enabled:
+            # Use the current Python executable + main.py path
+            exe = sys.executable
+            script = str(__import__("pathlib").Path(__file__).parent / "main.py")
+            winreg.SetValueEx(key, "OHNO", 0, winreg.REG_SZ, f'"{exe}" "{script}"')
+        else:
+            try:
+                winreg.DeleteValue(key, "OHNO")
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+    except Exception as e:
+        print(f"[settings] autostart registry error: {e}")
 
 
 class SettingsDialog(QDialog):
@@ -58,6 +108,11 @@ class SettingsDialog(QDialog):
             }
             QComboBox::drop-down {
                 border: none;
+            }
+            QCheckBox {
+                font-size: 13px;
+                color: #374151;
+                spacing: 6px;
             }
             #saveBtn {
                 background-color: #3b82f6;
@@ -142,6 +197,26 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(tone_form)
 
+        # -- Theme section --
+        theme_label = QLabel("Appearance")
+        theme_label.setObjectName("sectionLabel")
+        layout.addWidget(theme_label)
+
+        theme_form = QFormLayout()
+        theme_form.setSpacing(8)
+
+        self._theme_combo = QComboBox()
+        current_theme = self._cfg.get("theme", "system")
+        for value, display in THEMES:
+            self._theme_combo.addItem(display, value)
+        for i in range(self._theme_combo.count()):
+            if self._theme_combo.itemData(i) == current_theme:
+                self._theme_combo.setCurrentIndex(i)
+                break
+        theme_form.addRow("Theme:", self._theme_combo)
+
+        layout.addLayout(theme_form)
+
         # -- Hotkeys section --
         hotkey_label = QLabel("Hotkeys")
         hotkey_label.setObjectName("sectionLabel")
@@ -160,11 +235,21 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(hotkey_form)
 
-        # -- Note about hotkeys --
-        note = QLabel("Hotkey changes take effect after restarting the app.")
+        note = QLabel("Hotkeys rebind immediately on save — no restart needed.")
         note.setStyleSheet("font-size: 11px; color: #6b7280; font-style: italic;")
         note.setWordWrap(True)
         layout.addWidget(note)
+
+        # -- Startup section --
+        startup_label = QLabel("Startup")
+        startup_label.setObjectName("sectionLabel")
+        layout.addWidget(startup_label)
+
+        self._autostart_cb = QCheckBox("Start OHNO with Windows")
+        self._autostart_cb.setChecked(
+            self._cfg.get("start_with_windows", False) or _get_autostart_enabled()
+        )
+        layout.addWidget(self._autostart_cb)
 
         layout.addStretch()
 
@@ -194,8 +279,13 @@ class SettingsDialog(QDialog):
         self._cfg["default_source_lang"] = _NAME_TO_CODE.get(src_name, "zh-TW")
         self._cfg["default_target_lang"] = _NAME_TO_CODE.get(tgt_name, "en")
         self._cfg["default_tone"] = self._tone_combo.currentData()
+        self._cfg["theme"] = self._theme_combo.currentData()
         self._cfg["hotkey"] = self._hotkey_edit.text().strip() or "ctrl+shift+t"
         self._cfg["clipboard_hotkey"] = self._clip_hotkey_edit.text().strip() or "ctrl+shift+v"
+        self._cfg["start_with_windows"] = self._autostart_cb.isChecked()
+
+        # Apply start-with-Windows registry change
+        _set_autostart(self._autostart_cb.isChecked())
 
         save_config(self._cfg)
         self.settings_changed.emit(self._cfg)

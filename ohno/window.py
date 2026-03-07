@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QPoint, QEvent, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 
 from translation import DebounceManager
-from clipboard import set_clipboard_text
+from clipboard import set_clipboard_text, get_clipboard_text
 from config import load_history, save_history
 from languages import LANG_NAMES, display_name_for_code, _NAME_TO_CODE
 from word_lookup import LookupManager, LookupPopup
@@ -71,7 +71,7 @@ class _TitleBar(QWidget):
         # App label (doubles as drag handle)
         title = QLabel("OHNO")
         title.setObjectName("titleLabel")
-        title.setStyleSheet("font-weight: bold; font-size: 13px; color: #374151;")
+        title.setStyleSheet("font-weight: bold; font-size: 13px;")
         layout.addWidget(title)
 
         layout.addStretch()
@@ -156,9 +156,14 @@ class TranslatorWindow(QWidget):
         self._lookup_mgr.lookup_error.connect(self._on_lookup_error)
         self._showing_popup = False
         self._first_show = True
+        self._hotkey_listener = None  # set via set_hotkey_listener()
         self._history: list[dict] = load_history()
         self._setup_window()
         self._setup_translation()
+
+    def set_hotkey_listener(self, listener) -> None:
+        """Store reference to HotkeyListener for live rebinding from settings."""
+        self._hotkey_listener = listener
 
     # ------------------------------------------------------------------
     # Setup
@@ -317,88 +322,152 @@ class TranslatorWindow(QWidget):
         grip_row.addWidget(grip_right)
         root.addLayout(grip_row)
 
-    def _apply_stylesheet(self) -> None:
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f0f4f8;
-                color: #1f2937;
+    def _apply_stylesheet(self, theme: str | None = None) -> None:
+        if theme is None:
+            theme = self._cfg.get("theme", "light")
+
+        dark = self._is_dark_theme(theme)
+
+        if dark:
+            bg = "#1e293b"
+            fg = "#e2e8f0"
+            title_bg = "#0f172a"
+            input_bg = "#334155"
+            input_border = "#475569"
+            input_hover = "#64748b"
+            focus_border = "#3b82f6"
+            btn_hover_bg = "#475569"
+            close_hover_bg = "#ef4444"
+            close_hover_fg = "#ffffff"
+            title_fg = "#e2e8f0"
+            status_fg = "#94a3b8"
+        else:
+            bg = "#f0f4f8"
+            fg = "#1f2937"
+            title_bg = "#e2e8f0"
+            input_bg = "white"
+            input_border = "#cbd5e1"
+            input_hover = "#94a3b8"
+            focus_border = "#60a5fa"
+            btn_hover_bg = "#e2e8f0"
+            close_hover_bg = "#fca5a5"
+            close_hover_fg = "#991b1b"
+            title_fg = "#374151"
+            status_fg = "#6b7280"
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {bg};
+                color: {fg};
                 font-family: system-ui, sans-serif;
-            }
-            #titleBar {
-                background-color: #e2e8f0;
+            }}
+            #titleBar {{
+                background-color: {title_bg};
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
-            }
-            #titleBtn {
+            }}
+            #titleLabel {{
+                color: {title_fg};
+            }}
+            #titleBtn {{
                 background: transparent;
                 border: none;
                 font-size: 14px;
                 border-radius: 4px;
-            }
-            #titleBtn:hover {
-                background-color: #cbd5e1;
-            }
-            #closeTitleBtn {
+                color: {fg};
+            }}
+            #titleBtn:hover {{
+                background-color: {btn_hover_bg};
+            }}
+            #closeTitleBtn {{
                 background: transparent;
                 border: none;
                 font-size: 14px;
                 border-radius: 4px;
-            }
-            #closeTitleBtn:hover {
-                background-color: #fca5a5;
-                color: #991b1b;
-            }
-            QComboBox {
-                border: 1px solid #cbd5e1;
+                color: {fg};
+            }}
+            #closeTitleBtn:hover {{
+                background-color: {close_hover_bg};
+                color: {close_hover_fg};
+            }}
+            QComboBox {{
+                border: 1px solid {input_border};
                 border-radius: 4px;
                 padding: 4px 8px;
-                background-color: white;
-                color: #1f2937;
+                background-color: {input_bg};
+                color: {fg};
                 font-size: 13px;
-            }
-            QComboBox:hover {
-                border-color: #94a3b8;
-            }
-            QComboBox::drop-down {
+            }}
+            QComboBox:hover {{
+                border-color: {input_hover};
+            }}
+            QComboBox::drop-down {{
                 border: none;
-            }
-            QTextEdit {
-                border: 1px solid #cbd5e1;
+            }}
+            QTextEdit {{
+                border: 1px solid {input_border};
                 border-radius: 6px;
                 padding: 6px;
-                background-color: white;
-                color: #1f2937;
+                background-color: {input_bg};
+                color: {fg};
                 font-size: 14px;
-            }
-            QTextEdit:focus {
-                border-color: #60a5fa;
-            }
-            #swapBtn {
-                border: 1px solid #cbd5e1;
+            }}
+            QTextEdit:focus {{
+                border-color: {focus_border};
+            }}
+            #swapBtn {{
+                border: 1px solid {input_border};
                 border-radius: 4px;
-                background-color: white;
+                background-color: {input_bg};
+                color: {fg};
                 font-size: 16px;
                 font-weight: bold;
-            }
-            #swapBtn:hover {
-                background-color: #e2e8f0;
-                border-color: #94a3b8;
-            }
-            #actionBtn {
-                border: 1px solid #cbd5e1;
+            }}
+            #swapBtn:hover {{
+                background-color: {btn_hover_bg};
+                border-color: {input_hover};
+            }}
+            #actionBtn {{
+                border: 1px solid {input_border};
                 border-radius: 4px;
-                background-color: white;
+                background-color: {input_bg};
+                color: {fg};
                 padding: 4px 16px;
                 font-size: 13px;
-            }
-            #actionBtn:hover {
-                background-color: #e2e8f0;
-                border-color: #94a3b8;
-            }
-            QSizeGrip {
+            }}
+            #actionBtn:hover {{
+                background-color: {btn_hover_bg};
+                border-color: {input_hover};
+            }}
+            QSizeGrip {{
                 background: transparent;
-            }
+            }}
         """)
+
+        # Update status label color to match theme (guard for initial call before label exists)
+        if hasattr(self, '_status_label'):
+            self._status_label.setStyleSheet(f"color: {status_fg}; font-size: 12px;")
+
+    @staticmethod
+    def _is_dark_theme(theme: str) -> bool:
+        """Determine if we should use dark colors."""
+        if theme == "dark":
+            return True
+        if theme == "light":
+            return False
+        # "system" — check Windows registry for dark mode
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                0, winreg.KEY_READ,
+            )
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return val == 0  # 0 = dark mode
+        except Exception:
+            return False  # default to light
 
     def _setup_translation(self) -> None:
         self._source.textChanged.connect(self._on_source_changed)
@@ -531,6 +600,30 @@ class TranslatorWindow(QWidget):
         self._output.clear()
 
     # ------------------------------------------------------------------
+    # Clipboard paste (Phase 5)
+    # ------------------------------------------------------------------
+
+    def paste_clipboard(self) -> None:
+        """Paste clipboard text into source textarea. Called by Ctrl+Shift+V hotkey."""
+        text = get_clipboard_text()
+        if not text:
+            # Show brief "no text" message
+            self._status_label.setText("No text in clipboard")
+            self._status_label.setVisible(True)
+            QTimer.singleShot(1500, lambda: self._status_label.setVisible(False))
+            # Still show window if hidden
+            if not self.isVisible() or self.isMinimized():
+                self.toggle()
+            return
+
+        # Show window if hidden
+        if not self.isVisible() or self.isMinimized():
+            self.toggle()
+
+        # Set source text — this auto-triggers translation via textChanged
+        self._source.setPlainText(text)
+
+    # ------------------------------------------------------------------
     # History
     # ------------------------------------------------------------------
 
@@ -627,6 +720,7 @@ class TranslatorWindow(QWidget):
 
     def _apply_settings(self, new_cfg: dict) -> None:
         """Apply settings from the dialog without restarting."""
+        old_cfg = self._cfg
         self._cfg = new_cfg
 
         # Update language dropdowns
@@ -646,6 +740,20 @@ class TranslatorWindow(QWidget):
         self._source_combo.blockSignals(False)
         self._target_combo.blockSignals(False)
 
+        # Apply theme change immediately
+        if new_cfg.get("theme") != old_cfg.get("theme"):
+            self._apply_stylesheet(new_cfg["theme"])
+
+        # Rebind hotkeys live if they changed
+        if self._hotkey_listener and (
+            new_cfg.get("hotkey") != old_cfg.get("hotkey")
+            or new_cfg.get("clipboard_hotkey") != old_cfg.get("clipboard_hotkey")
+        ):
+            self._hotkey_listener.rebind(
+                new_cfg.get("hotkey", "ctrl+shift+t"),
+                new_cfg.get("clipboard_hotkey", "ctrl+shift+v"),
+            )
+
         # Re-trigger translation with new settings if there's text
         if self._source.toPlainText().strip():
             self._trigger_translation()
@@ -655,12 +763,20 @@ class TranslatorWindow(QWidget):
     # ------------------------------------------------------------------
 
     def toggle(self) -> None:
-        if self.isVisible():
+        if self.isMinimized():
+            # Restore from minimized state
+            self.showNormal()
+            self._ensure_on_screen()
+            self.activateWindow()
+            self.raise_()
+        elif self.isVisible():
             self.hide()
         else:
             if self._first_show:
                 self._center_on_screen()
                 self._first_show = False
+            else:
+                self._ensure_on_screen()
             self.show()
             self.activateWindow()
             self.raise_()
@@ -673,6 +789,29 @@ class TranslatorWindow(QWidget):
                 geo.center().x() - self.width() // 2,
                 geo.center().y() - self.height() // 2,
             )
+
+    def bring_to_front(self) -> None:
+        """Force-show the window, restore if minimized, ensure on-screen, and raise."""
+        if self.isMinimized():
+            self.showNormal()
+        self._ensure_on_screen()
+        self.show()
+        self.activateWindow()
+        self.raise_()
+
+    def _ensure_on_screen(self) -> None:
+        """If the window is mostly off-screen, re-center it."""
+        screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        pos = self.pos()
+        w, h = self.width(), self.height()
+        # Check if at least 50px of the window is visible on screen
+        visible_x = max(0, min(pos.x() + w, geo.right()) - max(pos.x(), geo.left()))
+        visible_y = max(0, min(pos.y() + h, geo.bottom()) - max(pos.y(), geo.top()))
+        if visible_x < 50 or visible_y < 50:
+            self._center_on_screen()
 
     # ------------------------------------------------------------------
     # Keyboard: Escape to dismiss
